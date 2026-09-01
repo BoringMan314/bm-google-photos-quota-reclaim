@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { execSync, exec } from 'child_process';
-import { ADB_PATH, ADB_EXE, ADB_DOWNLOAD_URL } from './config.mjs';
+import { ADB_PATH, ADB_EXE, ADB_DOWNLOAD_URL, ADB_LOCK_FILE } from './config.mjs';
 
 const PIXEL1_CODENAMES = new Set(['sailfish', 'marlin']);
 let selectedSerial = null;
@@ -56,8 +56,41 @@ export function listAdbDevices() {
   }
 }
 
+function readAdbLock() {
+  try {
+    if (!fs.existsSync(ADB_LOCK_FILE)) return null;
+    const data = JSON.parse(fs.readFileSync(ADB_LOCK_FILE, 'utf8'));
+    return data?.serial || null;
+  } catch {
+    return null;
+  }
+}
+
+export function getLockedSerial() {
+  return readAdbLock();
+}
+
+export function lockAdbSerial(serial) {
+  if (!serial) return;
+  fs.writeFileSync(ADB_LOCK_FILE, JSON.stringify({
+    serial,
+    lockedAt: new Date().toISOString(),
+  }, null, 2));
+}
+
+export function clearAdbLock() {
+  try {
+    if (fs.existsSync(ADB_LOCK_FILE)) fs.unlinkSync(ADB_LOCK_FILE);
+  } catch {}
+}
+
 function resolveSelected(devices = listAdbDevices()) {
   const ready = devices.filter(d => d.ready);
+  const locked = readAdbLock();
+  if (locked && ready.some(d => d.serial === locked)) {
+    selectedSerial = locked;
+    return selectedSerial;
+  }
   if (selectedSerial && ready.some(d => d.serial === selectedSerial)) return selectedSerial;
   if (ready.length === 1) {
     selectedSerial = ready[0].serial;
@@ -78,7 +111,15 @@ export function getSelectedSerial() {
 
 export function setSelectedSerial(serial) {
   const devices = listAdbDevices();
+  const locked = readAdbLock();
+  const lockedConnected = locked && devices.some(d => d.serial === locked && d.ready);
+  if (lockedConnected && serial && serial !== locked) {
+    throw new Error('ADB device is locked to the phone used for Trash + Reupload. Run Cleanup or Reset first.');
+  }
   if (!serial) {
+    if (lockedConnected) {
+      throw new Error('ADB device is locked to the phone used for Trash + Reupload. Run Cleanup or Reset first.');
+    }
     selectedSerial = null;
     return getAdbStatus();
   }
@@ -93,11 +134,14 @@ export function getAdbStatus() {
   const devices = listAdbDevices();
   const selected = resolveSelected(devices);
   const current = devices.find(d => d.serial === selected) || null;
+  const locked = readAdbLock();
   return {
     devices,
     selected,
     current,
     connected: !!selected,
+    locked,
+    matchesLock: !locked || selected === locked,
   };
 }
 

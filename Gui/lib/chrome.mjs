@@ -3,6 +3,22 @@ import { execSync, spawn } from 'child_process';
 import { CHROME_PATHS, CHROME_PROFILE_DIR, CHROME_GUI_PROFILE_DIR } from './config.mjs';
 import { log } from './sse.mjs';
 
+let shuttingDown = false;
+let shutdownTimer = null;
+
+export function cancelScheduledShutdown() {
+  if (shutdownTimer) {
+    clearTimeout(shutdownTimer);
+    shutdownTimer = null;
+  }
+}
+
+export function scheduleShutdown(reason = '', delayMs = 3000) {
+  if (shuttingDown) return;
+  cancelScheduledShutdown();
+  shutdownTimer = setTimeout(() => shutdownApp(reason || 'GUI closed'), delayMs);
+}
+
 export function findChrome() {
   const envPath = process.env.CHROME_PATH;
   if (envPath && fs.existsSync(envPath)) return envPath;
@@ -36,6 +52,14 @@ export function openAppWindow(url) {
       else execSync(`xdg-open ${url}`);
     } catch {}
   }
+}
+
+export function shutdownApp(reason = '') {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  cancelScheduledShutdown();
+  if (reason) console.log(`Shutting down (${reason})`);
+  setTimeout(() => process.exit(0), 150);
 }
 
 export function deleteProfile() {

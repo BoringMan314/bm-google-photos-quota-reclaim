@@ -15,6 +15,8 @@
 
 ## Скриншоты
 
+![](screenshots/screenshot01.png)
+
 ![](screenshots/google-photo-recovery-initial.png)
 ![](screenshots/google-photo-recovery-completed.png)
 

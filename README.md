@@ -15,7 +15,11 @@ Reclaim Google Photos storage quota. Finds quota-consuming photos, downloads the
 - **Intuitive GUI** — step-by-step interface guides you through the entire process with real-time progress
 - **English, Russian, Traditional Chinese, Simplified Chinese, and Japanese interface** — switch languages with one click
 
+
+
 ## Screenshots
+
+![](screenshots/screenshot01.png)
 
 ![](screenshots/google-photo-recovery-initial.png)
 ![](screenshots/google-photo-recovery-completed.png)
@@ -27,15 +31,21 @@ Reclaim Google Photos storage quota. Finds quota-consuming photos, downloads the
 - **Pixel 1** with USB debugging enabled and Google Photos set to Original Quality backup
 - Windows 10/11 (macOS and Linux are supported but require a manual ADB setup — see below)
 
+
+
 ## Get Started
 
-1. **Download** the latest release archive and extract it to any folder <!-- add release link here -->
+1. **Download** the latest release archive and extract it to any folder 
 2. **Launch the app** — run `Google Photos Quota Reclaim.bat`; the app will open in a separate window automatically
 3. **Open Chrome** — click **Launch Chrome** in the top bar, then sign into Google Photos in the browser window that opens
 4. **Connect your Pixel 1** via USB cable — the ADB indicator in the top bar will turn green when the device is detected
 5. **Click Load** in the sidebar, select the albums you want to process, and follow the on-screen steps
 
+
+
 ## ADB Setup
+
+
 
 ### Windows
 
@@ -55,6 +65,8 @@ Download [Android Platform Tools](https://developer.android.com/tools/releases/p
 6. **Restore Albums & Archives** — puts photos back into their original albums and re-archives photos that were archived before
 7. **Cleanup Pixel** — removes the pushed files from the device's camera roll
 
+
+
 ## Implementation details
 
 See [docs/implementation.md](docs/implementation.md) for the CLI pipeline, RPC reference, critical constraints, and technical notes.
@@ -65,9 +77,10 @@ MIT
 
 ---
 
+
+
 ## Support
 
 If this tool saved you time or storage space, consider buying the author a coffee.
 
-[!["Buy Me A Coffee"](https://cdn.buymeacoffee.com/buttons/v2/arial-orange.png)](https://www.buymeacoffee.com/aleksanderzverev)
-
+!["Buy Me A Coffee"](https://cdn.buymeacoffee.com/buttons/v2/arial-orange.png)

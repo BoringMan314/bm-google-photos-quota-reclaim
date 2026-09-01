@@ -6,8 +6,8 @@ import { getCdpTabs, connectCdp, tryGetAccountEmail } from '../lib/cdp.mjs';
 import { getTokens, listAllAlbums } from '../lib/rpc.mjs';
 import { readManifest, manifestStats, writeManifest } from '../lib/manifest.mjs';
 import { broadcast, log, currentOp, sseClients, requestStop } from '../lib/sse.mjs';
-import { launchChrome, deleteProfile } from '../lib/chrome.mjs';
-import { checkAdb, getAdbStatus, setSelectedSerial } from '../lib/adb.mjs';
+import { launchChrome, deleteProfile, scheduleShutdown, cancelScheduledShutdown } from '../lib/chrome.mjs';
+import { checkAdb, getAdbStatus, setSelectedSerial, clearAdbLock } from '../lib/adb.mjs';
 import { CHROME_PROFILE_DIR, DOWNLOADS_DIR, MANIFEST_FILE, PORT, ADB_PATH, WORK_DIR } from '../lib/config.mjs';
 import { scanStep, scanFullStep } from '../steps/scanStep.mjs';
 import { enrichStep } from '../steps/enrichStep.mjs';
@@ -15,6 +15,8 @@ import { restoreAlbumsStep } from '../steps/albumsStep.mjs';
 import { trashReuploadStep } from '../steps/trashReuploadStep.mjs';
 import { verifyStep } from '../steps/verifyStep.mjs';
 import { cleanupPixelStep, matchManifestStep, matchAlbumsStep, switchAccountStep } from '../steps/miscSteps.mjs';
+import { gpthStatus, pickFolder, gpthProcessStep } from '../steps/gpthStep.mjs';
+import { downloadStep } from '../steps/downloadStep.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const emailCacheMap = new Map();
@@ -92,6 +94,7 @@ async function handleStatusRequest(res) {
       workDir: WORK_DIR,
       downloadsDir: DOWNLOADS_DIR,
       downloadCount: fs.existsSync(DOWNLOADS_DIR) ? fs.readdirSync(DOWNLOADS_DIR).length : 0,
+      gpth: gpthStatus(),
     });
   } catch (err) {
     return json(res, { cdpConnected: false, error: err.message, manifest: manifestStats([]) });
@@ -136,11 +139,14 @@ function buildOperationsMap(body) {
     '/api/restore-albums': () => restoreAlbumsStep(),
     '/api/cleanup-pixel':  () => cleanupPixelStep(),
     '/api/match':          () => body.albumIds?.length ? matchAlbumsStep(body) : matchManifestStep(),
+    '/api/download':       () => downloadStep(),
+    '/api/gpth-process':   () => gpthProcessStep(body),
     '/api/switch-account': () => body.path ? switchAccountStep(body.path) : Promise.resolve({ error: 'path required' }),
     '/api/reset-manifest': () => {
       if (fs.existsSync(MANIFEST_FILE)) fs.unlinkSync(MANIFEST_FILE);
+      clearAdbLock();
       broadcast('stats', manifestStats([]));
-      log('Manifest deleted.', 'warn');
+      log('Manifest deleted. ADB device unlocked.', 'warn');
       return Promise.resolve({ ok: true });
     },
   };
@@ -149,6 +155,7 @@ function buildOperationsMap(body) {
 export async function handle(req, res) {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+  if (pathname !== '/api/shutdown') cancelScheduledShutdown();
 
   if (req.method === 'OPTIONS') return handleCors(res);
   if (pathname === '/' || pathname === '/index.html') return serveIndexHtml(res);
@@ -168,10 +175,19 @@ export async function handle(req, res) {
     catch (err) { return json(res, { error: err.message }, 500); }
   }
   if (pathname === '/api/chrome-info' && req.method === 'GET') return handleChromeInfoRequest(res);
+  if (pathname === '/api/shutdown') {
+    json(res, { ok: true });
+    scheduleShutdown('GUI closed', 3000);
+    return;
+  }
   if (pathname === '/api/stop' && req.method === 'POST') {
     requestStop();
     log('Stop requested by user.', 'warn');
     return json(res, { ok: true });
+  }
+  if (pathname === '/api/pick-folder' && req.method === 'POST') {
+    try { return json(res, await pickFolder()); }
+    catch (err) { return json(res, { error: err.message }, 500); }
   }
 
   if (req.method !== 'POST') { res.writeHead(404); return res.end('Not found'); }

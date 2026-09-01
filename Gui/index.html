@@ -25,7 +25,7 @@ header h1 { font-size: 16px; font-weight: 600; flex: 1; }
 .badge.bad { background: rgba(248,113,113,.15); color: var(--error); }
 .badge.warn { background: rgba(251,191,36,.15); color: var(--warn); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-.adb-select { max-width: 220px; padding: 3px 6px; font-size: 12px; background: var(--bg); color: inherit; border: 1px solid var(--border); border-radius: 6px; }
+.adb-select { max-width: 220px; padding: 3px 6px; font-size: 12px; background: var(--surface2, var(--bg)); color: inherit; border: 1px solid var(--border); border-radius: 6px; }
 
 /* Layout */
 main { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 1fr 200px; flex: 1; min-height: 0; }
@@ -233,6 +233,7 @@ button.small { padding: 4px 12px; font-size: 12px; }
       <div style="margin-top:6px;display:flex;gap:8px;align-items:center">
         <span id="workDirLabel" style="font-size:11px;color:var(--muted)"></span>
         <span id="downloadsLabel" style="font-size:11px;color:var(--muted)"></span>
+        <span id="gpthLabel" style="font-size:11px;color:var(--muted)"></span>
       </div>
     </div>
 
@@ -270,14 +271,17 @@ button.small { padding: 4px 12px; font-size: 12px; }
         <div class="step">
           <div class="step-num" id="snum-3">3</div>
           <div class="step-info">
-            <div class="step-name" id="step3-name">Match Downloads</div>
-            <div class="step-desc" id="step3-desc">Link files in ./downloads/ to manifest items</div>
+            <div class="step-name" id="step3-name">Download &amp; Match</div>
+            <div class="step-desc" id="step3-desc">Download originals from Google Photos, or link files in ./downloads/</div>
             <div class="step-desc" id="step3-note" style="margin-top:3px"></div>
             <div class="step-stat pending" id="sstat-3">Scan first</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-            <button class="small primary step-btn" id="btn-match" onclick="matchAlbums()" disabled>Match</button>
+            <button class="small primary step-btn" id="btn-download" onclick="runDownload()" disabled>Download</button>
+            <button class="small step-btn" id="btn-match" onclick="matchAlbums()" disabled>Match</button>
             <button class="small step-btn" id="btn-view-unmatched" onclick="showUnmatchedItems()" disabled>Unmatched</button>
+            <button class="small step-btn" id="btn-gpth" onclick="runGpthProcess()" disabled>Process</button>
+            <button class="small step-btn" id="btn-stop-download" onclick="stopDownload()" style="display:none;color:var(--error);border-color:var(--error)">Stop</button>
           </div>
         </div>
 
@@ -343,7 +347,7 @@ button.small { padding: 4px 12px; font-size: 12px; }
             <div class="step-name" id="step8-name">Support the Author</div>
             <div class="step-desc" id="step8-desc">This tool saved your Google Photos storage — completely free. If it helped, a coffee would mean a lot.</div>
           </div>
-          <a href="https://buymeacoffee.com/AleksanderZverev" target="_blank" rel="noopener noreferrer" style="flex-shrink:0">
+          <a href="https://ko-fi.com/boringman0314" target="_blank" rel="noopener noreferrer" style="flex-shrink:0">
             <button class="btn-coffee" id="btn-support"><span id="btn-support-label">Buy a coffee</span></button>
           </a>
         </div>
@@ -404,7 +408,11 @@ let lang = localStorage.getItem('lang') || 'en';
 let chromeProfileSizeMb = null;
 let adbBinaryWarnShown = false;
 let adbReady = false;
+let adbLockedSerial = null;
+let adbMatchesLock = true;
 let adbSerialSynced = false;
+let gpthFound = false;
+let gpthVersion = null;
 
 const LANGS = {
   en: {
@@ -452,14 +460,26 @@ const LANGS = {
     btnViewScanned: 'View',
     chkScanAll: 'Scan all library (ignore album selection)',
 
-    step3Name: 'Match Downloads',
-    step3Desc: 'Link files in ./downloads/ to manifest items',
-    step3Note: 'Place photo files in the <b>downloads/</b> folder. To preserve metadata (dates, GPS), process with <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> first.',
+    step3Name: 'Download & Match',
+    step3Desc: 'Download originals from Google Photos, or link files in ./downloads/',
+    step3Note: 'Click <b>Download</b> to pull quota originals into <b>downloads/</b>. Or place files yourself / click <b>Process</b> with <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> (dates, GPS), then <b>Match</b>.',
     step3Pending1: 'Scan first',
-    step3Pending2: 'Place files in ./downloads/, then match',
-    step3Done: (n, total) => `${n}/${total} files matched`,
+    step3Pending2: 'Download from Photos, or place files then match',
+    step3Done: (n, total) => `${n}/${total} files downloaded`,
+    btnDownload: 'Download',
     btnMatch: 'Match',
     btnViewUnmatched: 'View',
+    btnGpth: 'Process',
+    gpthLabel: (v) => v ? `GTH: ${v}` : 'GTH: not installed',
+    modalGpthTitle: 'Process Takeout with GPTH Neo',
+    modalGpthBody: 'Select the Google Takeout folder (extracted Takeout, or a folder of ZIP files). Files are copied into <b>downloads/</b> with EXIF dates and GPS restored. Original Takeout files are not moved.',
+    modalGpthMissing: 'gpth.exe was not found.<br><br>Run <b>UpdateGooglePhotosTakeoutHelperNeo.bat</b> in the project root, then click Process again.',
+    modalGpthBrowse: 'Browse',
+    modalGpthStart: 'Start',
+    modalGpthCancel: 'Cancel',
+    modalGpthPathPlaceholder: 'Takeout folder path',
+    gpthNeedPath: 'Select a Takeout folder first.',
+    gpthPickFailed: (e) => `Folder picker failed: ${e}`,
 
     viewerScannedTitle: 'Scanned quota items',
     viewerUnmatchedTitle: 'Unmatched items (no local file)',
@@ -551,10 +571,12 @@ Google Photos on the Pixel then backs them up — and Pixel 1 has a permanent ex
 If several phones are plugged in, use the dropdown next to the badge. Pixel 1 (<code>sailfish</code> / Pixel XL <code>marlin</code>) is auto-selected when it is the only first-gen Pixel.<br><br>
 ADB is only needed for the <b>Trash + Reupload</b> and <b>Cleanup Pixel</b> steps.`,
     adbPick: 'Select ADB device',
+    adbNoDevice: 'No device',
     adbUnauthorized: 'unauthorized',
     adbOffline: 'offline',
     adbPixel1: 'Pixel 1',
-    badgeAdbTitle: 'Click to choose ADB device',
+    adbLocked: 'Locked until Cleanup or Reset',
+    adbWrongPhone: 'Wrong phone — select the one used for Trash + Reupload',
 
     popupChromeTitle: 'Why launch Chrome?',
     popupChromeBody: `All Google Photos API calls go through the browser — not directly from this app. This is because Google's API requires your <b>session cookies</b>, which only exist inside Chrome.<br><br>
@@ -590,6 +612,7 @@ When you click Load, the app asks Chrome to fetch your album list using the same
     viewerNoMatches: 'No matches',
     refreshTitle: 'Refresh status',
     badgeCdpTitle: 'Click to learn about CDP',
+    badgeAdbTitle: 'Click to learn about ADB',
   },
 
   ru: {
@@ -637,14 +660,26 @@ When you click Load, the app asks Chrome to fetch your album list using the same
     btnViewScanned: 'Смотреть',
     chkScanAll: 'Сканировать всю библиотеку (без фильтра по альбомам)',
 
-    step3Name: 'Привязать загрузки',
-    step3Desc: 'Связать файлы из ./downloads/ с элементами манифеста',
-    step3Note: 'Помести файлы фото в папку <b>downloads/</b>. Для сохранения метаданных (даты, GPS) используй <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a>.',
+    step3Name: 'Скачать и привязать',
+    step3Desc: 'Скачать оригиналы из Google Photos или связать файлы из ./downloads/',
+    step3Note: 'Нажми <b>Скачать</b>, чтобы выгрузить квотные оригиналы в <b>downloads/</b>. Или положи файлы вручную / нажми <b>Обработать</b> с <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> (даты, GPS), затем <b>Привязать</b>.',
     step3Pending1: 'Сначала сканируй',
-    step3Pending2: 'Положи файлы в ./downloads/, затем привяжи',
-    step3Done: (n, total) => `Привязано: ${n}/${total}`,
+    step3Pending2: 'Скачай из Photos или положи файлы и привяжи',
+    step3Done: (n, total) => `Скачано: ${n}/${total}`,
+    btnDownload: 'Скачать',
     btnMatch: 'Привязать',
     btnViewUnmatched: 'Смотреть',
+    btnGpth: 'Обработать',
+    gpthLabel: (v) => v ? `GTH: ${v}` : 'GTH: не установлен',
+    modalGpthTitle: 'Обработать Takeout через GPTH Neo',
+    modalGpthBody: 'Выбери папку Google Takeout (распакованный Takeout или папка с ZIP). Файлы копируются в <b>downloads/</b> с восстановленными датами и GPS. Исходный Takeout не перемещается.',
+    modalGpthMissing: 'gpth.exe не найден.<br><br>Запусти <b>UpdateGooglePhotosTakeoutHelperNeo.bat</b> в корне проекта, затем снова нажми «Обработать».',
+    modalGpthBrowse: 'Обзор',
+    modalGpthStart: 'Старт',
+    modalGpthCancel: 'Отмена',
+    modalGpthPathPlaceholder: 'Путь к папке Takeout',
+    gpthNeedPath: 'Сначала выбери папку Takeout.',
+    gpthPickFailed: (e) => `Не удалось выбрать папку: ${e}`,
 
     viewerScannedTitle: 'Отсканированные квотные фото',
     viewerUnmatchedTitle: 'Не сматченные (нет локального файла)',
@@ -735,11 +770,6 @@ Google Photos на Pixel затем делает бэкап — а у Pixel 1 е
 <b>Зелёный значок:</b> выбранный Pixel подключён по USB, USB-отладка разрешена; команды идут только на этот serial.<br><br>
 Если подключено несколько телефонов — выбери устройство в списке рядом со значком. Pixel 1 (<code>sailfish</code> / Pixel XL <code>marlin</code>) выбирается сам, если он единственный first-gen Pixel.<br><br>
 ADB нужен только для шагов <b>Удалить + залить</b> и <b>Очистить Pixel</b>.`,
-    adbPick: 'Выбери устройство ADB',
-    adbUnauthorized: 'не авторизовано',
-    adbOffline: 'офлайн',
-    adbPixel1: 'Pixel 1',
-    badgeAdbTitle: 'Нажми, чтобы выбрать устройство ADB',
 
     popupChromeTitle: 'Зачем запускать Chrome?',
     popupChromeBody: `Все запросы к Google Photos идут через браузер — не напрямую из приложения. Это нужно потому, что API Google требует <b>сессионных кук</b>, которые существуют только внутри Chrome.<br><br>
@@ -775,6 +805,14 @@ ADB нужен только для шагов <b>Удалить + залить</
     viewerNoMatches: 'Нет совпадений',
     refreshTitle: 'Обновить статус',
     badgeCdpTitle: 'Нажми, чтобы узнать про CDP',
+    adbPick: 'Выбери устройство ADB',
+    adbNoDevice: 'Нет устройства',
+    adbUnauthorized: 'не авторизовано',
+    adbOffline: 'офлайн',
+    adbPixel1: 'Pixel 1',
+    adbLocked: 'Заблокировано до Cleanup или Reset',
+    adbWrongPhone: 'Не тот телефон — выбери тот, на который копировали',
+    badgeAdbTitle: 'Нажми, чтобы узнать про ADB',
   },
 
   zh_TW: {
@@ -822,14 +860,26 @@ ADB нужен только для шагов <b>Удалить + залить</
     btnViewScanned: '檢視',
     chkScanAll: '掃描整個媒體庫（忽略相簿選擇）',
 
-    step3Name: '配對下載檔',
-    step3Desc: '將 ./downloads/ 中的檔案對應到清單項目',
-    step3Note: '請把照片檔放到 <b>downloads/</b> 資料夾。若要保留中繼資料（日期、GPS），請先用 <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> 處理。',
+    step3Name: '下載與配對',
+    step3Desc: '從 Google 相簿下載原圖，或把 ./downloads/ 的檔案對上清單',
+    step3Note: '按 <b>下載</b> 把佔容量原圖抓到 <b>downloads/</b>。也可以自行放檔，或按 <b>處理</b> 用 <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a>（日期、GPS），再按 <b>配對</b>。',
     step3Pending1: '請先掃描',
-    step3Pending2: '把檔案放到 ./downloads/，再按配對',
-    step3Done: (n, total) => `已配對 ${n}/${total} 個檔案`,
+    step3Pending2: '從相簿下載，或放好檔案後配對',
+    step3Done: (n, total) => `已下載 ${n}/${total} 個檔案`,
+    btnDownload: '下載',
     btnMatch: '配對',
     btnViewUnmatched: '檢視',
+    btnGpth: '處理',
+    gpthLabel: (v) => v ? `GTH：${v}` : 'GTH：未安裝',
+    modalGpthTitle: '用 GPTH Neo 處理 Takeout',
+    modalGpthBody: '選擇 Google Takeout 資料夾（已解壓的 Takeout，或放 ZIP 的資料夾）。檔案會複製到 <b>downloads/</b>，並還原 EXIF 日期與 GPS。原始 Takeout 不會被搬走。',
+    modalGpthMissing: '找不到 gpth.exe。<br><br>請先在專案根目錄執行 <b>UpdateGooglePhotosTakeoutHelperNeo.bat</b>，再按「處理」。',
+    modalGpthBrowse: '瀏覽',
+    modalGpthStart: '開始',
+    modalGpthCancel: '取消',
+    modalGpthPathPlaceholder: 'Takeout 資料夾路徑',
+    gpthNeedPath: '請先選擇 Takeout 資料夾。',
+    gpthPickFailed: (e) => `無法選擇資料夾：${e}`,
 
     viewerScannedTitle: '已掃描的佔用配額項目',
     viewerUnmatchedTitle: '未配對項目（沒有本機檔案）',
@@ -920,11 +970,6 @@ Pixel 上的 Google 相簿接著會備份這些檔案——而 Pixel 1 有永久
 <b>綠色徽章：</b> 已選的 Pixel 已用 USB 連接、已授權 USB 偵錯，且指令只會打到該序號。<br><br>
 若同時插了多台手機，用徽章旁的下拉選單指定裝置。若只有一台初代 Pixel（<code>sailfish</code>／Pixel XL <code>marlin</code>），會自動選它。<br><br>
 只有 <b>移到垃圾桶並重新上傳</b> 和 <b>清理 Pixel</b> 這兩步需要 ADB。`,
-    adbPick: '選擇 ADB 裝置',
-    adbUnauthorized: '未授權',
-    adbOffline: '離線',
-    adbPixel1: 'Pixel 1',
-    badgeAdbTitle: '點擊選擇 ADB 裝置',
 
     popupChromeTitle: '為什麼要啟動 Chrome？',
     popupChromeBody: `所有 Google 相簿 API 呼叫都經過瀏覽器，而不是直接由本程式發出。因為 Google 的 API 需要你的 <b>工作階段 Cookie</b>，那些 Cookie 只存在 Chrome 裡。<br><br>
@@ -960,6 +1005,14 @@ Pixel 上的 Google 相簿接著會備份這些檔案——而 Pixel 1 有永久
     viewerNoMatches: '沒有符合的結果',
     refreshTitle: '重新整理狀態',
     badgeCdpTitle: '點擊了解 CDP',
+    adbPick: '選擇 ADB 裝置',
+    adbNoDevice: '沒有裝置',
+    adbUnauthorized: '未授權',
+    adbOffline: '離線',
+    adbPixel1: 'Pixel 1',
+    adbLocked: '已鎖定，直到 Cleanup 或 Reset',
+    adbWrongPhone: '裝置不符 — 請選回 Trash + Reupload 時使用的手機',
+    badgeAdbTitle: '點擊了解 ADB',
   },
 
   zh_CN: {
@@ -1007,14 +1060,26 @@ Pixel 上的 Google 相簿接著會備份這些檔案——而 Pixel 1 有永久
     btnViewScanned: '查看',
     chkScanAll: '扫描整个媒体库（忽略相册选择）',
 
-    step3Name: '匹配下载文件',
-    step3Desc: '将 ./downloads/ 中的文件对应到清单项目',
-    step3Note: '请把照片文件放到 <b>downloads/</b> 文件夹。若要保留元数据（日期、GPS），请先用 <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> 处理。',
+    step3Name: '下载与匹配',
+    step3Desc: '从 Google 相册下载原图，或把 ./downloads/ 的文件对上清单',
+    step3Note: '点击 <b>下载</b> 把占用配额的原图抓到 <b>downloads/</b>。也可以自行放文件，或点击 <b>处理</b> 用 <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a>（日期、GPS），再点击 <b>匹配</b>。',
     step3Pending1: '请先扫描',
-    step3Pending2: '把文件放到 ./downloads/，再点击匹配',
-    step3Done: (n, total) => `已匹配 ${n}/${total} 个文件`,
+    step3Pending2: '从相册下载，或放好文件后匹配',
+    step3Done: (n, total) => `已下载 ${n}/${total} 个文件`,
+    btnDownload: '下载',
     btnMatch: '匹配',
     btnViewUnmatched: '查看',
+    btnGpth: '处理',
+    gpthLabel: (v) => v ? `GTH：${v}` : 'GTH：未安装',
+    modalGpthTitle: '用 GPTH Neo 处理 Takeout',
+    modalGpthBody: '选择 Google Takeout 文件夹（已解压的 Takeout，或放 ZIP 的文件夹）。文件会复制到 <b>downloads/</b>，并还原 EXIF 日期与 GPS。原始 Takeout 不会被搬走。',
+    modalGpthMissing: '找不到 gpth.exe。<br><br>请先在项目根目录运行 <b>UpdateGooglePhotosTakeoutHelperNeo.bat</b>，再点击“处理”。',
+    modalGpthBrowse: '浏览',
+    modalGpthStart: '开始',
+    modalGpthCancel: '取消',
+    modalGpthPathPlaceholder: 'Takeout 文件夹路径',
+    gpthNeedPath: '请先选择 Takeout 文件夹。',
+    gpthPickFailed: (e) => `无法选择文件夹：${e}`,
 
     viewerScannedTitle: '已扫描的占用配额项目',
     viewerUnmatchedTitle: '未匹配项目（没有本地文件）',
@@ -1105,11 +1170,6 @@ Pixel 上的 Google 相册接着会备份这些文件——而 Pixel 1 有永久
 <b>绿色徽章：</b> 已选的 Pixel 已用 USB 连接、已授权 USB 调试，且命令只会打到该序列号。<br><br>
 如果同时插了多台手机，用徽章旁的下拉菜单指定设备。若只有一台初代 Pixel（<code>sailfish</code>／Pixel XL <code>marlin</code>），会自动选它。<br><br>
 只有 <b>移到回收站并重新上传</b> 和 <b>清理 Pixel</b> 这两步需要 ADB。`,
-    adbPick: '选择 ADB 设备',
-    adbUnauthorized: '未授权',
-    adbOffline: '离线',
-    adbPixel1: 'Pixel 1',
-    badgeAdbTitle: '点击选择 ADB 设备',
 
     popupChromeTitle: '为什么要启动 Chrome？',
     popupChromeBody: `所有 Google 相册 API 调用都经过浏览器，而不是直接由本程序发出。因为 Google 的 API 需要你的 <b>会话 Cookie</b>，那些 Cookie 只存在于 Chrome 中。<br><br>
@@ -1145,6 +1205,14 @@ Pixel 上的 Google 相册接着会备份这些文件——而 Pixel 1 有永久
     viewerNoMatches: '没有匹配结果',
     refreshTitle: '刷新状态',
     badgeCdpTitle: '点击了解 CDP',
+    adbPick: '选择 ADB 设备',
+    adbNoDevice: '没有设备',
+    adbUnauthorized: '未授权',
+    adbOffline: '离线',
+    adbPixel1: 'Pixel 1',
+    adbLocked: '已锁定，直到 Cleanup 或 Reset',
+    adbWrongPhone: '设备不符 — 请选回 Trash + Reupload 时使用的手机',
+    badgeAdbTitle: '点击了解 ADB',
   },
 
   ja_JP: {
@@ -1192,14 +1260,26 @@ Pixel 上的 Google 相册接着会备份这些文件——而 Pixel 1 有永久
     btnViewScanned: '表示',
     chkScanAll: 'ライブラリ全体をスキャン（アルバム選択を無視）',
 
-    step3Name: 'ダウンロードを照合',
-    step3Desc: './downloads/ のファイルをマニフェスト項目に紐づける',
-    step3Note: '写真ファイルを <b>downloads/</b> フォルダに置いてください。メタデータ（日付、GPS）を残す場合は、先に <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a> で処理してください。',
+    step3Name: 'ダウンロードと照合',
+    step3Desc: 'Google フォトから原版をダウンロードするか、./downloads/ のファイルを紐づける',
+    step3Note: '<b>ダウンロード</b> で容量消費の原版を <b>downloads/</b> に保存します。自分で置くか、<b>処理</b> で <a href="https://github.com/Xentraxx/GooglePhotosTakeoutHelper_Neo" target="_blank" style="color:var(--accent)">GooglePhotosTakeoutHelper Neo</a>（日付、GPS）を使ったあと、<b>照合</b> してください。',
     step3Pending1: '先にスキャンしてください',
-    step3Pending2: './downloads/ にファイルを置いてから照合',
-    step3Done: (n, total) => `${n}/${total} ファイルを照合済み`,
+    step3Pending2: 'フォトからダウンロードするか、ファイルを置いて照合',
+    step3Done: (n, total) => `${n}/${total} ファイルをダウンロード済み`,
+    btnDownload: 'ダウンロード',
     btnMatch: '照合',
     btnViewUnmatched: '表示',
+    btnGpth: '処理',
+    gpthLabel: (v) => v ? `GTH: ${v}` : 'GTH: 未インストール',
+    modalGpthTitle: 'GPTH Neo で Takeout を処理',
+    modalGpthBody: 'Google Takeout フォルダ（展開済み、または ZIP が入ったフォルダ）を選んでください。ファイルは EXIF の日付と GPS を復元して <b>downloads/</b> にコピーします。元の Takeout は移動しません。',
+    modalGpthMissing: 'gpth.exe が見つかりません。<br><br>プロジェクトのルートで <b>UpdateGooglePhotosTakeoutHelperNeo.bat</b> を実行してから、もう一度「処理」を押してください。',
+    modalGpthBrowse: '参照',
+    modalGpthStart: '開始',
+    modalGpthCancel: 'キャンセル',
+    modalGpthPathPlaceholder: 'Takeout フォルダのパス',
+    gpthNeedPath: '先に Takeout フォルダを選んでください。',
+    gpthPickFailed: (e) => `フォルダを選べませんでした：${e}`,
 
     viewerScannedTitle: 'スキャン済みの容量消費アイテム',
     viewerUnmatchedTitle: '未照合（ローカルファイルなし）',
@@ -1290,11 +1370,6 @@ Pixel 上の Google フォトがその後バックアップします。Pixel 1 �
 <b>緑のバッジ：</b> 選択した Pixel が USB 接続され、USB デバッグが許可されており、コマンドはそのシリアルにだけ送られます。<br><br>
 複数台をつないでいるときは、バッジ横のリストで端末を指定してください。初代 Pixel（<code>sailfish</code>／Pixel XL <code>marlin</code>）が 1 台だけの場合は自動選択します。<br><br>
 ADB が必要なのは <b>ゴミ箱へ移動して再アップロード</b> と <b>Pixel をクリーンアップ</b> だけです。`,
-    adbPick: 'ADB 端末を選択',
-    adbUnauthorized: '未許可',
-    adbOffline: 'オフライン',
-    adbPixel1: 'Pixel 1',
-    badgeAdbTitle: 'クリックして ADB 端末を選ぶ',
 
     popupChromeTitle: 'なぜ Chrome を起動するのか？',
     popupChromeBody: `Google フォト API への呼び出しは、このアプリから直接ではなく、ブラウザ経由で行われます。Google の API には <b>セッション Cookie</b> が必要で、それは Chrome 内にしか存在しないためです。<br><br>
@@ -1330,6 +1405,14 @@ ADB が必要なのは <b>ゴミ箱へ移動して再アップロード</b> と 
     viewerNoMatches: '一致する項目がありません',
     refreshTitle: '状態を更新',
     badgeCdpTitle: 'クリックして CDP について見る',
+    adbPick: 'ADB 端末を選択',
+    adbNoDevice: '端末なし',
+    adbUnauthorized: '未許可',
+    adbOffline: 'オフライン',
+    adbPixel1: 'Pixel 1',
+    adbLocked: 'Cleanup または Reset までロック中',
+    adbWrongPhone: '別の端末です — Trash + Reupload に使った端末を選んでください',
+    badgeAdbTitle: 'クリックして ADB について見る',
   }
 };
 
@@ -1423,8 +1506,11 @@ function applyLang() {
   setText('btn-scan-full', t('btnScan'));
   setText('btn-view-scanned', t('btnViewScanned'));
   setText('chk-scan-all-label', t('chkScanAll'));
+  setText('btn-download', t('btnDownload'));
   setText('btn-match', t('btnMatch'));
   setText('btn-view-unmatched', t('btnViewUnmatched'));
+  setText('btn-gpth', t('btnGpth'));
+  setText('gpthLabel', t('gpthLabel', gpthVersion));
   setText('viewer-close-btn', t('viewerClose'));
   const vsearch = document.getElementById('viewer-search');
   if (vsearch) vsearch.placeholder = t('viewerSearch');
@@ -1438,6 +1524,8 @@ function applyLang() {
   setText('lbl-concurrency', t('lblConcurrency'));
   const stopBtn = document.getElementById('btn-stop-trash');
   if (stopBtn && !stopBtn.disabled) stopBtn.textContent = t('btnStop');
+  const stopDlBtn = document.getElementById('btn-stop-download');
+  if (stopDlBtn && !stopDlBtn.disabled) stopDlBtn.textContent = t('btnStop');
   const refreshBtn = document.getElementById('btn-refresh-status');
   if (refreshBtn) refreshBtn.title = t('refreshTitle');
   const cdpBadge = document.getElementById('cdpBadge');
@@ -1511,7 +1599,8 @@ function connectSSE() {
     if (msg.type === 'opEnd') {
       currentOp = null;
       setStepDone(msg.name, msg.ok);
-      updateButtonStates();
+      if (msg.name === 'trash-reupload' || msg.name === 'cleanup-pixel') refreshStatus();
+      else updateButtonStates();
       if (msg.summary) appendLog(msg.ok ? `✓ ${msg.name}: ${msg.summary}` : `✗ ${msg.name}: ${msg.summary}`, msg.ok ? 'success' : 'error');
       if (msg.name === 'trash-reupload' && awaitingPixelRestore) {
         awaitingPixelRestore = false;
@@ -1537,6 +1626,8 @@ function connectSSE() {
 
 const OP_TO_STEP = {
   'scan-full': 2,
+  'download': 3,
+  'gpth-process': 3,
   'match': 3,
   'trash-reupload': 4,
   'verify': 5,
@@ -1579,6 +1670,8 @@ function updateAdbUi(r) {
   if (!adbBadge) return;
   if (r.adbBinaryFound === false) {
     adbReady = false;
+    adbLockedSerial = r.adb?.locked || null;
+    adbMatchesLock = r.adb?.matchesLock !== false;
     adbBadge.className = 'badge bad';
     adbBadge.title = t('adbNotFound');
     if (labelEl) labelEl.textContent = 'ADB';
@@ -1592,31 +1685,57 @@ function updateAdbUi(r) {
   const info = r.adb || {};
   const devices = info.devices || [];
   adbReady = !!info.connected;
-  adbBadge.className = `badge ${adbReady ? 'ok' : 'warn'}`;
-  adbBadge.title = t('badgeAdbTitle');
+  adbLockedSerial = info.locked || null;
+  adbMatchesLock = info.matchesLock !== false;
+  adbBadge.className = `badge ${adbReady && adbMatchesLock ? 'ok' : 'warn'}`;
+  adbBadge.title = adbLockedSerial && !adbMatchesLock ? t('adbWrongPhone') : t('badgeAdbTitle');
   if (labelEl) {
     if (info.current) labelEl.textContent = `ADB ${info.current.model || info.current.serial}`;
     else if (devices.length) labelEl.textContent = `ADB (${devices.length})`;
     else labelEl.textContent = 'ADB';
   }
   if (!sel) return;
-  sel.hidden = devices.length === 0;
   const want = info.selected || '';
-  sel.innerHTML = '';
-  if (!info.selected && devices.filter(d => d.ready).length > 1) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = t('adbPick');
-    sel.appendChild(opt);
+  const choosing = document.activeElement === sel;
+  const listSig = devices.map(d => `${d.serial}|${d.state}|${d.model}|${d.ready}|${d.isPixel1}`).join('\n') + `\nL:${info.locked || ''}`;
+  if (!choosing && sel.dataset.sig !== listSig) {
+    sel.dataset.sig = listSig;
+    sel.innerHTML = '';
+    if (!info.selected && devices.filter(d => d.ready).length > 1) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = t('adbPick');
+      sel.appendChild(opt);
+    }
+    for (const d of devices) {
+      const opt = document.createElement('option');
+      opt.value = d.serial;
+      opt.textContent = adbDeviceLabel(d);
+      opt.disabled = !d.ready;
+      sel.appendChild(opt);
+    }
+    if (info.locked && !devices.some(d => d.serial === info.locked)) {
+      const opt = document.createElement('option');
+      opt.value = info.locked;
+      opt.textContent = `${info.locked} (${t('adbLocked')})`;
+      opt.disabled = true;
+      sel.appendChild(opt);
+    }
   }
-  for (const d of devices) {
-    const opt = document.createElement('option');
-    opt.value = d.serial;
-    opt.textContent = adbDeviceLabel(d);
-    opt.disabled = !d.ready;
-    sel.appendChild(opt);
-  }
-  if (want) sel.value = want;
+  if (!choosing && want && sel.value !== want) sel.value = want;
+  sel.hidden = sel.options.length === 0;
+  updateAdbSelectLock();
+}
+
+function updateAdbSelectLock() {
+  const sel = document.getElementById('adbDeviceSelect');
+  if (!sel) return;
+  const busyAdb = currentOp === 'trash-reupload' || currentOp === 'cleanup-pixel';
+  const lockOnThis = !!(adbLockedSerial && adbMatchesLock && adbReady);
+  sel.disabled = busyAdb || lockOnThis;
+  if (lockOnThis) sel.title = t('adbLocked');
+  else if (adbLockedSerial && !adbMatchesLock) sel.title = t('adbWrongPhone');
+  else sel.title = '';
 }
 
 async function onAdbDeviceChange() {
@@ -1653,6 +1772,11 @@ async function refreshStatus() {
     if (r.manifest) updateStats(r.manifest);
     if (r.workDir) document.getElementById('workDirLabel').textContent = t('workDirLabel', r.workDir);
     if (r.downloadsDir) document.getElementById('downloadsLabel').textContent = t('downloadsLabel', r.downloadCount ?? 0);
+    if (r.gpth) {
+      gpthFound = !!r.gpth.found;
+      gpthVersion = r.gpth.version || null;
+      setText('gpthLabel', t('gpthLabel', gpthVersion));
+    }
     currentOp = r.currentOp || null;
     updateButtonStates();
   } catch {}
@@ -1749,19 +1873,28 @@ function updateButtonStates() {
 
   setBtn('btn-scan-full', scanAll || sel.length > 0);
   setBtn('btn-view-scanned', (s.quota ?? 0) > 0);
+  setBtn('btn-download', (s.quota ?? 0) > 0);
   setBtn('btn-match', (s.quota ?? 0) > 0);
   setBtn('btn-view-unmatched', (s.quota ?? 0) > 0);
-  setBtn('btn-trash-reupload', (s.downloaded ?? 0) > 0 && adbReady);
+  setBtn('btn-gpth', (s.quota ?? 0) > 0);
+  setBtn('btn-trash-reupload', (s.downloaded ?? 0) > 0 && adbReady && adbMatchesLock);
   setBtn('btn-verify', (s.trashed ?? 0) > 0);
   setBtn('btn-view-unverified', (s.trashed ?? 0) > (s.verified ?? 0));
   setBtn('btn-restore-albums', (s.verified ?? 0) > 0);
-  setBtn('btn-cleanup-pixel', (s.trashed ?? 0) > 0 && adbReady);
+  setBtn('btn-cleanup-pixel', (s.trashed ?? 0) > 0 && adbReady && adbMatchesLock);
+  updateAdbSelectLock();
 
   const stopBtn = document.getElementById('btn-stop-trash');
   if (stopBtn) {
     stopBtn.style.display = currentOp === 'trash-reupload' ? 'inline-block' : 'none';
     stopBtn.disabled = false;
     stopBtn.textContent = t('btnStop');
+  }
+  const stopDlBtn = document.getElementById('btn-stop-download');
+  if (stopDlBtn) {
+    stopDlBtn.style.display = currentOp === 'download' ? 'inline-block' : 'none';
+    stopDlBtn.disabled = false;
+    stopDlBtn.textContent = t('btnStop');
   }
 
   if (!busy) {
@@ -1901,14 +2034,76 @@ async function stopTrashReupload() {
   await post('/api/stop');
 }
 
+async function runDownload() {
+  if (currentOp) return;
+  const r = await post('/api/download');
+  if (r.error) appendLog(`Error: ${r.error}`, 'error');
+}
+
+async function stopDownload() {
+  const btn = document.getElementById('btn-stop-download');
+  if (btn) { btn.disabled = true; btn.textContent = t('btnStopping'); }
+  await post('/api/stop');
+}
+
 async function matchAlbums() {
   const r = await post('/api/match', {});
   if (r.error) appendLog(`Error: ${r.error}`, 'error');
 }
 
+async function runGpthProcess() {
+  if (currentOp) return;
+  if (!gpthFound) {
+    showModal({
+      title: t('modalGpthTitle'),
+      body: t('modalGpthMissing'),
+      buttons: [{ text: t('gotIt'), cls: 'primary', action: () => {} }],
+    });
+    return;
+  }
+  showModal({
+    title: t('modalGpthTitle'),
+    body: `${t('modalGpthBody')}<div style="display:flex;gap:6px;margin-top:12px">
+      <input id="gpth-input-path" class="viewer-search" style="flex:1;width:auto" placeholder="${t('modalGpthPathPlaceholder')}">
+      <button class="small" type="button" id="btn-gpth-browse">${t('modalGpthBrowse')}</button>
+    </div>`,
+    buttons: [
+      { text: t('modalGpthCancel'), cls: '', action: () => {} },
+      { text: t('modalGpthStart'), cls: 'primary', action: () => {} },
+    ],
+  });
+  const browseBtn = document.getElementById('btn-gpth-browse');
+  if (browseBtn) {
+    browseBtn.onclick = async ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      try {
+        const r = await post('/api/pick-folder');
+        if (r.error) { appendLog(t('gpthPickFailed', r.error), 'error'); return; }
+        if (r.path) document.getElementById('gpth-input-path').value = r.path;
+      } catch (err) {
+        appendLog(t('gpthPickFailed', err.message), 'error');
+      }
+    };
+  }
+  const footer = document.getElementById('popup-footer');
+  const startBtn = footer?.querySelector('button.primary');
+  if (startBtn) {
+    startBtn.onclick = async () => {
+      const inputPath = document.getElementById('gpth-input-path')?.value.trim();
+      closePopup();
+      if (!inputPath) { appendLog(t('gpthNeedPath'), 'warn'); return; }
+      const r = await post('/api/gpth-process', { inputPath });
+      if (r.error) appendLog(`Error: ${r.error}`, 'error');
+    };
+  }
+}
+
 async function resetManifest() {
   if (!confirm(t('confirmReset'))) return;
   await post('/api/reset-manifest');
+  adbLockedSerial = null;
+  adbMatchesLock = true;
   manifestStats = {};
   for (let n = 2; n <= 7; n++) {
     const el = document.getElementById(`snum-${n}`);
@@ -1916,6 +2111,7 @@ async function resetManifest() {
   }
   updateButtonStates();
   appendLog(t('manifestReset'), 'warn');
+  refreshStatus();
 }
 
 async function launchChrome() {
@@ -2057,6 +2253,9 @@ connectSSE();
 refreshStatus();
 loadChromeInfo();
 setInterval(refreshStatus, 10000);
+window.addEventListener('pagehide', () => {
+  try { navigator.sendBeacon(`${API}/api/shutdown`); } catch {}
+});
 </script>
 </body>
 </html>

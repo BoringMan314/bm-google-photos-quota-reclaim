@@ -3,7 +3,7 @@ import path from 'path';
 import { connectCdp } from '../lib/cdp.mjs';
 import { getTokens, enumerateAll, batchQuotaInfo } from '../lib/rpc.mjs';
 import { readManifest, writeManifest } from '../lib/manifest.mjs';
-import { adb, checkAdb, getAdbStatus } from '../lib/adb.mjs';
+import { adb, checkAdb, getAdbStatus, getLockedSerial, getSelectedSerial, clearAdbLock } from '../lib/adb.mjs';
 import { log, opStart, opEnd } from '../lib/sse.mjs';
 import { DOWNLOADS_DIR } from '../lib/config.mjs';
 
@@ -11,6 +11,11 @@ export async function cleanupPixelStep() {
   opStart('cleanup-pixel');
   try {
     if (!checkAdb()) throw new Error('No ADB device selected. Plug in the Pixel 1 or choose a device.');
+    const locked = getLockedSerial();
+    const serial = getSelectedSerial();
+    if (locked && serial !== locked) {
+      throw new Error(`Wrong ADB device. Files were pushed to ${locked}. Select that phone before Cleanup.`);
+    }
     const adbDev = getAdbStatus().current;
     if (adbDev) {
       log(`Using ADB device: ${adbDev.model || adbDev.serial}${adbDev.isPixel1 ? ' (Pixel 1)' : ''} [${adbDev.serial}]`);
@@ -19,6 +24,8 @@ export async function cleanupPixelStep() {
     adb('shell rm /sdcard/DCIM/Camera/*');
     const summary = 'Pixel camera roll cleaned.';
     log(summary, 'success');
+    clearAdbLock();
+    log('ADB device unlocked.', 'info');
     opEnd('cleanup-pixel', true, summary);
     return { ok: true };
   } catch (err) {

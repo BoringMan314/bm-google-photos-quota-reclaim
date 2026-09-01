@@ -3,7 +3,7 @@ import path from 'path';
 import { connectCdp } from '../lib/cdp.mjs';
 import { getTokens, enumerateAll, listAllAlbums } from '../lib/rpc.mjs';
 import { readManifest, writeManifest } from '../lib/manifest.mjs';
-import { adb, adbAsync, checkAdb, getAdbStatus, safeName } from '../lib/adb.mjs';
+import { adb, adbAsync, checkAdb, getAdbStatus, getLockedSerial, lockAdbSerial, getSelectedSerial, safeName } from '../lib/adb.mjs';
 import { log, opStart, opEnd, isStopRequested } from '../lib/sse.mjs';
 
 async function saveAlbumMembershipsForItems(cdp, tokens, manifest, itemsNeedingAlbums) {
@@ -70,6 +70,7 @@ async function pushPhotoToPixel(item) {
   const remote = `/sdcard/DCIM/Camera/${pushName}`;
   await adbAsync(`push "${item.downloadedAs}" "${remote}"`);
   item.pushedAs = pushName;
+  item.pushedToSerial = getSelectedSerial();
   try {
     await adbAsync(`shell content insert --uri content://media/external/images/media --bind "_data:s:${remote}" --bind "mime_type:s:image/jpeg" --bind "_display_name:s:${pushName}"`);
   } catch {}
@@ -79,6 +80,14 @@ export async function trashReuploadStep({ mediaKeys: filterKeys, saveAlbumsFirst
   opStart('trash-reupload');
   if (!checkAdb()) {
     const msg = 'No ADB device selected. Plug in the Pixel 1 or choose a device.';
+    log(msg, 'error');
+    opEnd('trash-reupload', false, msg);
+    return { ok: false, error: msg };
+  }
+  const locked = getLockedSerial();
+  const serial = getSelectedSerial();
+  if (locked && serial !== locked) {
+    const msg = `ADB device mismatch. Files were pushed to ${locked}. Select that phone (or Reset).`;
     log(msg, 'error');
     opEnd('trash-reupload', false, msg);
     return { ok: false, error: msg };
@@ -107,6 +116,8 @@ export async function trashReuploadStep({ mediaKeys: filterKeys, saveAlbumsFirst
       opEnd('trash-reupload', true, msg);
       return { ok: true, done: 0 };
     }
+    lockAdbSerial(serial);
+    log(`ADB locked to ${serial} until Cleanup or Reset.`, 'warn');
     const poolSize = Math.max(1, Math.min(concurrency, 10));
     log(`${items.length} items to process (concurrency: ${poolSize}).`);
 
