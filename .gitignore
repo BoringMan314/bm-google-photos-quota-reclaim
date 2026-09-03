@@ -21,6 +21,5 @@ adb/*
 # GPTH Neo binaries — download with UpdateGooglePhotosTakeoutHelperNeo.bat
 GooglePhotosTakeoutHelperNeo/*
 !GooglePhotosTakeoutHelperNeo/README.md
-
-*.url
-*.zip
+/*.url
+/*.zip
